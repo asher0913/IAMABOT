@@ -8,6 +8,7 @@ real opponent (see README).  Tags group them by the failure type they probe.
 V1 = "styles_v1"    # v1 core (formation around the payload)
 V5 = "styles_v5"    # v5 core (fire control + firing-position planner)
 V61 = "styles_v61"  # v6.1 core (press at 6 tiles)
+V9 = "styles_v9"    # v9 core (production fire control and healing)
 
 ROSTER = {
     # ---------------------------------------------------------------- history
@@ -50,6 +51,14 @@ ROSTER = {
     "jkt_cover": (V61, "OPP=cover", {"cover", "real:JaniceKeepTalking"}),
     "jkt_cover6": (V61, "OPP=cover,COVER_R=6.0", {"cover"}),
     "jkt_cover35": (V61, "OPP=cover,COVER_R=3.5", {"cover"}),
+    # ------------------- payload deathball (Team Name / JKT / clankerbot, 2026-09-19)
+    # The whole army stacked on the capture circle, pushing from the first fight on.
+    "ball_tn": (V61, "OPP=escort,IAMABOT_OPENING=BEHEBBEBHBBBHBBBH,ESCORT_RING=1.8,ESCORT_GAP=1.0", {"ball", "cover", "real:Team Name"}),
+    "ball_jkt": (V61, "OPP=escort,IAMABOT_OPENING=EBBBHBHBEEBHBBHBB,ESCORT_RING=1.8,ESCORT_GAP=0.9", {"ball", "cover", "heal", "real:JaniceKeepTalking"}),
+    "ball_clank": (V61, "OPP=escort,IAMABOT_OPENING=EBBBBBHBEEHHBHBHB,ESCORT_RING=2.2,ESCORT_GAP=1.2,IAMABOT_HEALER_RATIO=0.4", {"ball", "heal", "real:clankerbot"}),
+    "db_jkt": (V9, "OPP=deathball", {"ball", "heal", "real:JaniceKeepTalking"}),
+    "db_tn": (V9, "OPP=deathball,BALL_OPENING=BEHEBBEBHBBBHBBBH,BALL_EXTRACTORS=6", {"ball", "real:Team Name"}),
+    "db_clank": (V9, "OPP=deathball,BALL_OPENING=EBBBBBHBEEHHBHBHB,BALL_HEALERS=0.4", {"ball", "heal", "real:clankerbot"}),
     # ------------------------------------------------ turtle / stall / hug
     "reference": ("reference", "", {"turtle", "stack"}),
     "stacker": (V1, "OPP=stacker", {"turtle", "stack"}),

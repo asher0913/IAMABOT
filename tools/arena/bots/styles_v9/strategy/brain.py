@@ -182,11 +182,6 @@ class AdvancedStrategy:
     RACE_LEASH = _env("IAMABOT_RACE_LEASH", 10.0)
     RACE_ABORT = _env("IAMABOT_RACE_ABORT", 0.8)
     PUSH_MODE = _env("IAMABOT_PUSH", 1)
-    HEAL_ANY = _env("IAMABOT_HEAL_ANY", 1)
-    HEAL_SPOT = _env("IAMABOT_HEAL_SPOT", 1)
-    CONVERT = _env("IAMABOT_CONVERT", 1)
-    CONVERT_WINDOW = _env("IAMABOT_CONVERT_WINDOW", 30)
-    CONVERT_KEEP = _env("IAMABOT_CONVERT_KEEP", 1)
     PUSH_NEAR = _env("IAMABOT_PUSH_NEAR", 12.0)
     PUSH_LEASH = _env("IAMABOT_PUSH_LEASH", 11.0)
     PUSH_HOME_R = _env("IAMABOT_PUSH_HOME_R", 11.0)
@@ -543,9 +538,6 @@ class AdvancedStrategy:
                 ba.turn_action = TurnAction.TargetRotation(deg=ang % 360.0)
                 ba.special_action = SpecialAction.Extractor(mine=mine)
 
-        if self.CONVERT:
-            self._endgame_convert(state, act, me)
-
         if DEBUG and T >= self.debug_next:
             self.debug_next = T + 250
             b = get_budget()
@@ -651,34 +643,6 @@ class AdvancedStrategy:
         return dx / n, dy / n
 
     # ============================================================== production
-
-    def _endgame_convert(self, state: GameState, act: FleetAction, me: list) -> None:
-        """Right before production stops, trade extractors (worthless in the endgame, as
-        are tokens) for battle bots: while the fleet is full and the bank can pay, one
-        extractor self-destructs per tick and the next tick's rush fills the slot.  Gang
-        v13 (match 804) and DIBSFA (match 376) beat us this way: +6-8 guns for the
-        endgame fight while ours sat on 950 unspendable tokens.  Self-destruct only
-        removes the bot."""
-        T = state.tick
-        if not (self.END_T - self.CONVERT_WINDOW <= T < self.END_T - 1):
-            return
-        act.fabricator_next = BATTLE
-        cost = self.conf.fabricator.rush_cost
-        rushing = bool(act.rush_order)
-        if state.fabricator_me.tokens - (cost if rushing else 0) < cost:
-            return
-        if BOTS_MAX - len(me) - (1 if rushing else 0) > 0:
-            return  # a slot is already free; next tick's rush fills it
-        extractors = [u for u in me if u.cls == EXTRACTOR]
-        if len(extractors) <= self.CONVERT_KEEP:
-            return
-        # Keep the one farthest from the enemy (the endgame hider); trade the rest.
-        victim = min(
-            extractors,
-            key=lambda u: min(((u.x - e.x) ** 2 + (u.y - e.y) ** 2 for e in self.op), default=1e9),
-        )
-        act.bots[victim.id].self_destruct = True
-        self.stats["convert"] = self.stats.get("convert", 0) + 1
 
     def _production(self, state: GameState, act: FleetAction, me: list) -> None:
         counts = [0, 0, 0]
@@ -1567,31 +1531,14 @@ class AdvancedStrategy:
             lat = (slot - 1) * 1.05 if slot else 0.0
             tx = a.x + bx * 1.9 - by * lat
             ty = a.y + by * 1.9 + bx * lat
-            if self.HEAL_SPOT and not self._heal_spot_ok(tx, ty, a):
-                # A quarter of our planned heals failed on a wall between healer and
-                # patient (corridors, wall ends): swing the spot around the patient,
-                # staying on the side away from the enemy as far as possible.
-                base = math.atan2(ty - a.y, tx - a.x)
-                r = max(1.4, math.hypot(tx - a.x, ty - a.y))
-                for k in (1, -1, 2, -2, 3, -3, 4, -4):
-                    ang = base + k * 0.45
-                    cx, cy = a.x + math.cos(ang) * r, a.y + math.sin(ang) * r
-                    if self._heal_spot_ok(cx, cy, a):
-                        tx, ty = cx, cy
-                        break
             moves[h.id] = self._nav(h.x, h.y, tx, ty)
         return plans
-
-    def _heal_spot_ok(self, x, y, a) -> bool:
-        return self._disc_free(x, y, self.R + 0.05) and self._los(x, y, a.x, a.y)
 
     def _heal_triggers(self, healers, plans, moves) -> dict:
         """Final heading and trigger per healer, with the post-separation move."""
         out = {}
         ax, ay = self.AC
         by_id = {u.id: u for u in self.me}
-        landed: dict[int, int] = {}
-        misses = []
         for h in healers:
             mx, my = moves.get(h.id, (0.0, 0.0))
             ox = h.x + mx * self.SPEED
@@ -1600,8 +1547,6 @@ class AdvancedStrategy:
             a = by_id.get(aid) if aid is not None else None
             if a is None:
                 out[h.id] = (0, _ang(ax - ox, ay - oy), False)
-                if STATS:
-                    self.stats["miss_none"] = self.stats.get("miss_none", 0) + 1
                 continue
             ex, ey = a.x + a.vx, a.y + a.vy
             want = _ang(ex - ox, ey - oy)
@@ -1614,48 +1559,9 @@ class AdvancedStrategy:
                 and self._los(ox, oy, ex, ey)
             )
             out[h.id] = (a.id, want, ok)
-            if ok:
-                landed[a.id] = landed.get(a.id, 0) + 1
-            else:
-                misses.append((h, ox, oy))
-                if STATS:
-                    why = ("miss_far" if d > self.HEAL_R - 0.03
-                           else "miss_arc" if abs(_adiff(want, after)) > self.HEAL_HALF - 1.0 else "miss_los")
-                    self.stats[why] = self.stats.get(why, 0) + 1
             if STATS:
                 self.stats["heal_try"] += 1
                 self.stats["heal_ok"] += 1 if ok else 0
-        if self.HEAL_ANY and misses:
-            # The planned patient is out of reach or out of the arc this tick (in real
-            # matches our healers idled a third of the time with a wounded ally in range):
-            # heal whoever is wounded and healable right now, most hurt first.
-            maxhp = self.MAXHP
-            wounded = [u for u in self.me if u.hp < maxhp - 0.05]
-            for h, ox, oy in misses:
-                best = None
-                for a in wounded:
-                    if a.id == h.id or landed.get(a.id, 0) >= self.STACK:
-                        continue
-                    ex, ey = a.x + a.vx, a.y + a.vy
-                    d = math.hypot(ex - ox, ey - oy)
-                    if d > self.HEAL_R - 0.03:
-                        continue
-                    want = _ang(ex - ox, ey - oy)
-                    turn = max(-self.TURN, min(self.TURN, _adiff(want, h.ang)))
-                    if abs(_adiff(want, h.ang + turn)) > self.HEAL_HALF - 1.0:
-                        continue
-                    score = maxhp - a.hp + (1.0 if a.cls == BATTLE else 0.0)
-                    if best is None or score > best[0]:
-                        best = (score, a, want, ex, ey)
-                if best is None:
-                    continue
-                _, a, want, ex, ey = best
-                if not self._los(ox, oy, ex, ey):
-                    continue
-                out[h.id] = (a.id, want, True)
-                landed[a.id] = landed.get(a.id, 0) + 1
-                if STATS:
-                    self.stats["heal_alt"] = self.stats.get("heal_alt", 0) + 1
         return out
 
     def _away(self, x, y, enemies):
