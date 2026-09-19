@@ -185,6 +185,9 @@ class AdvancedStrategy:
     HEAL_ANY = _env("IAMABOT_HEAL_ANY", 1)
     MATCH_HEAL = _env("IAMABOT_MATCH_HEAL", 1)
     RALLY = _env("IAMABOT_RALLY", 1)
+    SENTRY = _env("IAMABOT_SENTRY", 1)
+    SENTRY_MIN = _env("IAMABOT_SENTRY_MIN", 5)
+    SENTRY_CAP = _env("IAMABOT_SENTRY_CAP", 0.0)
     RALLY_R = _env("IAMABOT_RALLY_R", 6.0)
     RALLY_MIN = _env("IAMABOT_RALLY_MIN", 6)
     MATCH_HEAL_MAX = _env("IAMABOT_MATCH_HEAL_MAX", 0.40)
@@ -1007,6 +1010,34 @@ class AdvancedStrategy:
             holders = [e for e in self.op if (e.px - px) ** 2 + (e.py - py) ** 2 <= zr2]
             if holders:
                 fighters = holders
+        # One body inside the circle freezes the payload: the engine only moves it when
+        # exactly one team is inside.  The one game we won against clankerbot (1368) was
+        # exactly this, and every payload loss today had nobody of ours in there.  One
+        # bot only, so the firing line keeps its guns.
+        if (
+            self.SENTRY
+            and len(front) >= self.SENTRY_MIN
+            and self.op_in_zone
+            and not self.me_in_zone
+            and self.capture <= self.SENTRY_CAP
+        ):
+            px0, py0 = self.P
+            key = (round(px0 * 4), round(py0 * 4))
+            cache = self.__dict__.get("_sentry_cache")
+            if cache and cache[0] == key and self.T - cache[1] < 40:
+                spots = cache[2]
+            else:
+                spots = self._anchor_points(1, [])
+                self._sentry_cache = (key, self.T, spots)
+            if spots:
+                tx, ty = spots[0]
+                pick = max(
+                    front,
+                    key=lambda b: (b.hp, -((b.x - tx) ** 2 + (b.y - ty) ** 2)),
+                )
+                moves[pick.id] = self._nav(pick.x, pick.y, tx, ty)
+                front = [b for b in front if b.id != pick.id]
+                self.stats["sentry"] = self.stats.get("sentry", 0) + 1
         if self.MOVE_MODE == "slots" or not fighters:
             return self._slot_moves(front, moves)
         D = self.D_PRESS
