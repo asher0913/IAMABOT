@@ -190,7 +190,7 @@ class AdvancedStrategy:
     SUSTAIN_MODE = _env("IAMABOT_SUSTAIN", 1)
     SUSTAIN_RATIO = _env("IAMABOT_SUSTAIN_RATIO", 0.36)
     SUSTAIN_EXTRACTORS = _env("IAMABOT_SUSTAIN_EXTRACTORS", 3)
-    SUSTAIN_TICK = _env("IAMABOT_SUSTAIN_TICK", 5)
+    SUSTAIN_TICK = _env("IAMABOT_SUSTAIN_TICK", 4)
     CONVERT = _env("IAMABOT_CONVERT", 1)
     BLIND = _env("IAMABOT_BLIND", 1)
     BLIND_T = _env("IAMABOT_BLIND_T", 120)
@@ -714,7 +714,9 @@ class AdvancedStrategy:
         nb, nh, ne = counts
         if T < 60:
             if T == self.SUSTAIN_TICK and self.SUSTAIN_MODE:
-                # One cheap production-order fingerprint, then zero runtime overhead.
+                # One cheap production-order fingerprint, then zero runtime overhead.  At
+                # tick 4 the enemy has exactly its first four units (at tick 5 it already
+                # has five, so the check never fired in v12).
                 # Current server leaders start B-B-B-E (clanker/Janice) or B-H-E-E
                 # (Team Name); our normal mirror starts B-B-E-E.  Avoid loops and
                 # geometry here: the compute bank is decisive in 9000-tick turtle games.
