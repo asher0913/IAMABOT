@@ -186,6 +186,11 @@ class AdvancedStrategy:
     MATCH_HEAL = _env("IAMABOT_MATCH_HEAL", 1)
     RALLY = _env("IAMABOT_RALLY", 1)
     SENTRY = _env("IAMABOT_SENTRY", 1)
+    BALLMODE = _env("IAMABOT_BALLMODE", 1)
+    BALL_NEAR = _env("IAMABOT_BALL_NEAR", 5.0)
+    BALL_MIN = _env("IAMABOT_BALL_MIN", 6)
+    BALL_LEASH = _env("IAMABOT_BALL_LEASH", 11.0)
+    BALL_FRAC = _env("IAMABOT_BALL_FRAC", 0.55)
     SENTRY_MIN = _env("IAMABOT_SENTRY_MIN", 5)
     SENTRY_CAP = _env("IAMABOT_SENTRY_CAP", 0.0)
     RALLY_R = _env("IAMABOT_RALLY_R", 6.0)
@@ -972,6 +977,21 @@ class AdvancedStrategy:
         fighters = self.op_fighters
         if self.PUSH_MODE:
             fighters = self._push_filter(front, fighters)
+        # Their whole army is committed to the payload (clankerbot sits 4.4 tiles from it,
+        # CSK 3.5, with 5-15 bodies in the circle).  Chasing the nearest enemy then leaves
+        # half our guns behind a wall: in matches 1610/1611 we fired a third of their
+        # volume with equal fleets.  Fight only what is at the payload, at the usual
+        # stand-off distance, so the whole army converges there with every gun in range.
+        if self.BALLMODE and len(front) >= 5:
+            bx, by = self.P
+            near_r2 = self.BALL_NEAR ** 2
+            n_ball = sum(1 for e in fighters if (e.px - bx) ** 2 + (e.py - by) ** 2 <= near_r2)
+            if n_ball >= max(self.BALL_MIN, self.BALL_FRAC * len(fighters)):
+                leash2 = self.BALL_LEASH ** 2
+                at_ball = [e for e in fighters if (e.px - bx) ** 2 + (e.py - by) ** 2 <= leash2]
+                if at_ball:
+                    fighters = at_ball
+                    self.stats["ballmode"] = self.stats.get("ballmode", 0) + 1
         if self.LEASH > 0:
             # Payload-centred army (what noeyedeer and JaniceKeepTalking do): only chase
             # enemies near the payload.  Raiders parked on our deposit are ignored and the
