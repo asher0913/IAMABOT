@@ -183,6 +183,11 @@ class AdvancedStrategy:
     RACE_ABORT = _env("IAMABOT_RACE_ABORT", 0.8)
     PUSH_MODE = _env("IAMABOT_PUSH", 1)
     HEAL_ANY = _env("IAMABOT_HEAL_ANY", 1)
+    MATCH_HEAL = _env("IAMABOT_MATCH_HEAL", 1)
+    RALLY = _env("IAMABOT_RALLY", 1)
+    RALLY_R = _env("IAMABOT_RALLY_R", 6.0)
+    RALLY_MIN = _env("IAMABOT_RALLY_MIN", 6)
+    MATCH_HEAL_MAX = _env("IAMABOT_MATCH_HEAL_MAX", 0.40)
     HEAL_SPOT = _env("IAMABOT_HEAL_SPOT", 1)
     # Current leader openings have a distinct four-bot production fingerprint.  A global
     # 36% healer ratio loses games to rush/economy opponents, so only raise our later ratio
@@ -751,6 +756,13 @@ class AdvancedStrategy:
         ):
             return EXTRACTOR
         healer_ratio = self.SUSTAIN_RATIO if self.sustain else self.HEALER_RATIO
+        if self.MATCH_HEAL and T > 600:
+            # Match the enemy's healer share: their healers are what makes our damage
+            # disappear (clankerbot healed back more than we dealt in match 1512).
+            op_f = [e for e in self.op if e.cls != EXTRACTOR]
+            if len(op_f) >= 8:
+                share = sum(1 for e in op_f if e.cls == HEALER) / len(op_f)
+                healer_ratio = max(healer_ratio, min(self.MATCH_HEAL_MAX, share))
         if nb >= 5 and nh < int(healer_ratio * (nb + nh) + 0.5):
             return HEALER
         return BATTLE
@@ -1021,6 +1033,19 @@ class AdvancedStrategy:
             D2 = self.D_CLOSE ** 2
         under_fire2 = (self.RANGE + 1.5) ** 2
         safe2 = (self.RANGE + 2.5) ** 2
+        # Reinforcements walk out of the spawn one at a time and die one at a time in
+        # front of the enemy ball (JaniceKeepTalking 1559: 14 battle bots alive, 4 of
+        # them anywhere near the payload).  A bot far from the army and not yet in
+        # contact joins the army first.
+        rally = None
+        if self.RALLY and len(front) >= self.RALLY_MIN:
+            ax0, ay0 = self.AC
+            near_army = [b for b in front if (b.x - ax0) ** 2 + (b.y - ay0) ** 2 <= self.RALLY_R ** 2]
+            if len(near_army) >= self.RALLY_MIN:
+                rally = (
+                    sum(b.x for b in near_army) / len(near_army),
+                    sum(b.y for b in near_army) / len(near_army),
+                )
         # The enemy is pushing the payload toward our end right now (Team Name 656,
         # brain_new): an army standing off behind a wall, with nothing to shoot for a
         # long time, walks back to the payload instead of watching it go.  The whole
@@ -1054,6 +1079,12 @@ class AdvancedStrategy:
             # Stand off at long range against an army in the open (it has to walk into our
             # fire), but close in on bodies sitting on the payload: from far away the
             # payload shields them, and they win the tiebreak by just sitting there.
+            if rally is not None and d2 > under_fire2:
+                rx, ry = rally
+                if (b.x - rx) ** 2 + (b.y - ry) ** 2 > self.RALLY_R ** 2:
+                    moves[b.id] = self._nav(b.x, b.y, rx, ry)
+                    self.stats["rally"] = self.stats.get("rally", 0) + 1
+                    continue
             lim2 = Dn2 if late_behind or (e.px - px) ** 2 + (e.py - py) ** 2 <= zone2 else D2
             if d2 > lim2:
                 moves[b.id] = self._nav(b.x, b.y, e.px, e.py)
