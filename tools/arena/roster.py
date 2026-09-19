@@ -16,6 +16,8 @@ ROSTER = {
     "v61": ("v61", "", {"history"}),
     "v7": ("v7", "", {"history"}),
     "v12": ("baseline_v12", "", {"history", "baseline"}),
+    "v10": ("v10", "", {"history"}),
+    "brain_new": ("brain_new", "", {"history", "cover", "teammate:GHX"}),
     # ------------------------------------------------------------------ rush
     "rushB": (V1, "OPP=advanced,IAMABOT_OPENING=BBBBBBBBBBBBBBBBB,IAMABOT_EXTRACTORS=0,IAMABOT_HEALER_RATIO=0", {"rush", "no_miners"}),
     "rushB5": (V5, "OPP=advanced,IAMABOT_OPENING=BBBBBBBBBBBBBBBBB,IAMABOT_EXTRACTORS=0,IAMABOT_HEALER_RATIO=0", {"rush", "no_miners"}),
@@ -86,4 +88,4 @@ QUICK = [
 # The key set (about a minute with -j 10): the replicas of the teams that beat us on the
 # server, plus the ones where past changes broke first.  Use it for every experiment;
 # run `full` only before a release.
-KEY = ["clanker", "jkt", "db_clank", "dibsfa8", "st24", "noey", "v12"]
+KEY = ["brain_new", "clanker", "jkt", "db_clank", "dibsfa8", "st24", "noey", "v12"]

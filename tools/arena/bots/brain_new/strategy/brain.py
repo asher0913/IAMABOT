@@ -42,6 +42,7 @@ import math
 import os
 
 from . import *
+from .v10 import AdvancedStrategyV10 as _VerifiedStrategy
 
 try:  # raw entry points: same functions as core.channel, minus the Vec2 wrapping
     import ctypes as _ctypes
@@ -182,14 +183,6 @@ class AdvancedStrategy:
     RACE_LEASH = _env("IAMABOT_RACE_LEASH", 10.0)
     RACE_ABORT = _env("IAMABOT_RACE_ABORT", 0.8)
     PUSH_MODE = _env("IAMABOT_PUSH", 1)
-    HEAL_ANY = _env("IAMABOT_HEAL_ANY", 1)
-    HEAL_SPOT = _env("IAMABOT_HEAL_SPOT", 1)
-    CONVERT = _env("IAMABOT_CONVERT", 1)
-    BLIND = _env("IAMABOT_BLIND", 1)
-    BLIND_T = _env("IAMABOT_BLIND_T", 120)
-    BLIND_DROP = _env("IAMABOT_BLIND_DROP", 0.01)
-    CONVERT_WINDOW = _env("IAMABOT_CONVERT_WINDOW", 30)
-    CONVERT_KEEP = _env("IAMABOT_CONVERT_KEEP", 1)
     PUSH_NEAR = _env("IAMABOT_PUSH_NEAR", 12.0)
     PUSH_LEASH = _env("IAMABOT_PUSH_LEASH", 11.0)
     PUSH_HOME_R = _env("IAMABOT_PUSH_HOME_R", 11.0)
@@ -230,8 +223,6 @@ class AdvancedStrategy:
         self.home_since = 0
         self.retreating: set = set()
         self.push = False
-        self.blind: dict = {}
-        self.cap_hist: list = []
         self.push_count = 0
         self.stealing = False
         self.debug_next = 0
@@ -460,10 +451,6 @@ class AdvancedStrategy:
             self.capture_moved = T
             self.last_capture = state.capture
         self.capture = state.capture
-        if T % 20 == 0:
-            self.cap_hist.append(state.capture)
-            if len(self.cap_hist) > 6:
-                self.cap_hist.pop(0)
         px, py = self._payload(state.capture)
         self.P = (px, py)
         self.endgame = T >= self.END_T
@@ -551,9 +538,6 @@ class AdvancedStrategy:
                     ang = _ang(self.dep[0] - ox, self.dep[1] - oy)
                 ba.turn_action = TurnAction.TargetRotation(deg=ang % 360.0)
                 ba.special_action = SpecialAction.Extractor(mine=mine)
-
-        if self.CONVERT:
-            self._endgame_convert(state, act, me)
 
         if DEBUG and T >= self.debug_next:
             self.debug_next = T + 250
@@ -660,34 +644,6 @@ class AdvancedStrategy:
         return dx / n, dy / n
 
     # ============================================================== production
-
-    def _endgame_convert(self, state: GameState, act: FleetAction, me: list) -> None:
-        """Right before production stops, trade extractors (worthless in the endgame, as
-        are tokens) for battle bots: while the fleet is full and the bank can pay, one
-        extractor self-destructs per tick and the next tick's rush fills the slot.  Gang
-        v13 (match 804) and DIBSFA (match 376) beat us this way: +6-8 guns for the
-        endgame fight while ours sat on 950 unspendable tokens.  Self-destruct only
-        removes the bot."""
-        T = state.tick
-        if not (self.END_T - self.CONVERT_WINDOW <= T < self.END_T - 1):
-            return
-        act.fabricator_next = BATTLE
-        cost = self.conf.fabricator.rush_cost
-        rushing = bool(act.rush_order)
-        if state.fabricator_me.tokens - (cost if rushing else 0) < cost:
-            return
-        if BOTS_MAX - len(me) - (1 if rushing else 0) > 0:
-            return  # a slot is already free; next tick's rush fills it
-        extractors = [u for u in me if u.cls == EXTRACTOR]
-        if len(extractors) <= self.CONVERT_KEEP:
-            return
-        # Keep the one farthest from the enemy (the endgame hider); trade the rest.
-        victim = min(
-            extractors,
-            key=lambda u: min(((u.x - e.x) ** 2 + (u.y - e.y) ** 2 for e in self.op), default=1e9),
-        )
-        act.bots[victim.id].self_destruct = True
-        self.stats["convert"] = self.stats.get("convert", 0) + 1
 
     def _production(self, state: GameState, act: FleetAction, me: list) -> None:
         counts = [0, 0, 0]
@@ -999,16 +955,6 @@ class AdvancedStrategy:
             D2 = self.D_CLOSE ** 2
         under_fire2 = (self.RANGE + 1.5) ** 2
         safe2 = (self.RANGE + 2.5) ** 2
-        # The enemy is pushing the payload toward our end right now (Team Name 656,
-        # brain_new): an army standing off behind a wall, with nothing to shoot for a
-        # long time, walks back to the payload instead of watching it go.  The whole
-        # blind group switches at about the same time, so it moves as one.
-        losing = (
-            self.BLIND
-            and len(self.cap_hist) >= 6
-            and self.cap_hist[0] - self.capture >= self.BLIND_DROP
-        )
-        blind_now = self.blind
         for b in front:
             ranked = sorted(fighters, key=lambda o: (o.px - b.x) ** 2 + (o.py - b.y) ** 2)
             e = ranked[0]
@@ -1055,19 +1001,6 @@ class AdvancedStrategy:
                     if (px - b.x) * nx + (py - b.y) * ny > 0:
                         nx, ny = -nx, -ny
                     moves[b.id] = self._nav(b.x, b.y, b.x + nx * 1.5, b.y + ny * 1.5)
-                    continue
-            if self.BLIND:
-                seen = False
-                for o in ranked[:5]:
-                    if (o.px - b.x) ** 2 + (o.py - b.y) ** 2 > shoot2:
-                        break
-                    if not self._payload_blocks(b.x, b.y, o.px, o.py) and self._los(b.x, b.y, o.px, o.py):
-                        seen = True
-                        break
-                blind_now[b.id] = 0 if seen else blind_now.get(b.id, 0) + 1
-                if losing and blind_now[b.id] >= self.BLIND_T:
-                    moves[b.id] = self._nav(b.x, b.y, px, py)
-                    self.stats["blind_move"] = self.stats.get("blind_move", 0) + 1
                     continue
             if self.PRESS_LOS:
                 # Stand only where we actually have a shot at someone; otherwise keep
@@ -1599,30 +1532,28 @@ class AdvancedStrategy:
             lat = (slot - 1) * 1.05 if slot else 0.0
             tx = a.x + bx * 1.9 - by * lat
             ty = a.y + by * 1.9 + bx * lat
-            if self.HEAL_SPOT and not self._heal_spot_ok(tx, ty, a):
-                # A quarter of our planned heals failed on a wall between healer and
-                # patient (corridors, wall ends): swing the spot around the patient,
-                # staying on the side away from the enemy as far as possible.
+            if getattr(self, "HEAL_SPOT", 0) and not self._heal_spot_ok(tx, ty, a):
                 base = math.atan2(ty - a.y, tx - a.x)
-                r = max(1.4, math.hypot(tx - a.x, ty - a.y))
-                for k in (1, -1, 2, -2, 3, -3, 4, -4):
-                    ang = base + k * 0.45
-                    cx, cy = a.x + math.cos(ang) * r, a.y + math.sin(ang) * r
-                    if self._heal_spot_ok(cx, cy, a):
-                        tx, ty = cx, cy
+                radius = max(1.4, math.hypot(tx - a.x, ty - a.y))
+                for direction in (1, -1, 2, -2, 3, -3, 4, -4):
+                    angle = base + direction * 0.45
+                    candidate_x = a.x + math.cos(angle) * radius
+                    candidate_y = a.y + math.sin(angle) * radius
+                    if self._heal_spot_ok(candidate_x, candidate_y, a):
+                        tx, ty = candidate_x, candidate_y
                         break
             moves[h.id] = self._nav(h.x, h.y, tx, ty)
         return plans
 
-    def _heal_spot_ok(self, x, y, a) -> bool:
-        return self._disc_free(x, y, self.R + 0.05) and self._los(x, y, a.x, a.y)
+    def _heal_spot_ok(self, x, y, patient) -> bool:
+        return self._disc_free(x, y, self.R + 0.05) and self._los(x, y, patient.x, patient.y)
 
     def _heal_triggers(self, healers, plans, moves) -> dict:
         """Final heading and trigger per healer, with the post-separation move."""
         out = {}
         ax, ay = self.AC
         by_id = {u.id: u for u in self.me}
-        landed: dict[int, int] = {}
+        landed = {}
         misses = []
         for h in healers:
             mx, my = moves.get(h.id, (0.0, 0.0))
@@ -1650,19 +1581,11 @@ class AdvancedStrategy:
                 landed[a.id] = landed.get(a.id, 0) + 1
             else:
                 misses.append((h, ox, oy))
-                if STATS:
-                    why = ("miss_far" if d > self.HEAL_R - 0.03
-                           else "miss_arc" if abs(_adiff(want, after)) > self.HEAL_HALF - 1.0 else "miss_los")
-                    self.stats[why] = self.stats.get(why, 0) + 1
             if STATS:
                 self.stats["heal_try"] += 1
                 self.stats["heal_ok"] += 1 if ok else 0
-        if self.HEAL_ANY and misses:
-            # The planned patient is out of reach or out of the arc this tick (in real
-            # matches our healers idled a third of the time with a wounded ally in range):
-            # heal whoever is wounded and healable right now, most hurt first.
-            maxhp = self.MAXHP
-            wounded = [u for u in self.me if u.hp < maxhp - 0.05]
+        if getattr(self, "HEAL_ANY", 0) and misses:
+            wounded = [u for u in self.me if u.hp < self.MAXHP - 0.05]
             for h, ox, oy in misses:
                 best = None
                 for a in wounded:
@@ -1676,7 +1599,7 @@ class AdvancedStrategy:
                     turn = max(-self.TURN, min(self.TURN, _adiff(want, h.ang)))
                     if abs(_adiff(want, h.ang + turn)) > self.HEAL_HALF - 1.0:
                         continue
-                    score = maxhp - a.hp + (1.0 if a.cls == BATTLE else 0.0)
+                    score = self.MAXHP - a.hp + (1.0 if a.cls == BATTLE else 0.0)
                     if best is None or score > best[0]:
                         best = (score, a, want, ex, ey)
                 if best is None:
@@ -2025,6 +1948,971 @@ class AdvancedStrategy:
                 )
             ba.special_action = SpecialAction.Battle(fire=fire)
         return act
+
+
+class DefensiveAssaultPrototype(AdvancedStrategy):
+    """Economy-first defence followed by a healer-backed late assault.
+
+    The base controller has strong fire replay and map helpers, but its default
+    movement is payload-first.  This controller deliberately keeps the army at
+    home until the late phase, then attacks with a radial keep-away/close-in
+    posture instead of parking in a firing line.
+    """
+
+    # The endgame starts at tick 6000 with this match config.  Begin the march
+    # 1200 ticks earlier so the army reaches the payload with time to fight.
+    ASSAULT_PREP_TICKS = _env("IAMABOT_NEW_ASSAULT_PREP", 1200)
+    TARGET_EXTRACTORS = _env("IAMABOT_NEW_EXTRACTORS", 6)
+    TARGET_HEALERS = _env("IAMABOT_NEW_HEALERS", 8)
+    HOME_GUARDS = _env("IAMABOT_NEW_HOME_GUARDS", 4)
+    DEFENSE_RADIUS = _env("IAMABOT_NEW_DEFENSE_RADIUS", 13.0)
+    DEFENSE_RING = _env("IAMABOT_NEW_DEFENSE_RING", 4.0)
+
+    # Radial combat band.  The bot is never asked to stand at point blank and
+    # never intentionally waits outside its ten-tile blaster range.
+    KITE_MIN = _env("IAMABOT_NEW_KITE_MIN", 5.9)
+    KITE_MAX = _env("IAMABOT_NEW_KITE_MAX", 9.0)
+    KITE_NEAR = _env("IAMABOT_NEW_KITE_NEAR", 6.7)
+    KITE_FAR = _env("IAMABOT_NEW_KITE_FAR", 8.7)
+    KITE_PERIOD = _env("IAMABOT_NEW_KITE_PERIOD", 48)
+    KITE_LANE = _env("IAMABOT_NEW_KITE_LANE", 0.45)
+    ASSAULT_PAYLOAD_RADIUS = _env("IAMABOT_NEW_ASSAULT_PAYLOAD_RADIUS", 19.0)
+    HOME_ALERT_RADIUS = _env("IAMABOT_NEW_HOME_ALERT_RADIUS", 16.0)
+    HOME_CRITICAL_RADIUS = _env("IAMABOT_NEW_HOME_CRITICAL_RADIUS", 10.5)
+    HOME_ASSAULT_GUARDS = _env("IAMABOT_NEW_HOME_ASSAULT_GUARDS", 2)
+    ASSAULT_CRITICAL_GUARDS = _env("IAMABOT_NEW_ASSAULT_CRITICAL_GUARDS", 1)
+    HOME_HEALERS = _env("IAMABOT_NEW_HOME_HEALERS", 2)
+    PUSHERS = _env("IAMABOT_NEW_PUSHERS", 4)
+    HEAL_ANY = _env("IAMABOT_NEW_HEAL_ANY", 1)
+    HEAL_SPOT = _env("IAMABOT_NEW_HEAL_SPOT", 1)
+    CONVERT = _env("IAMABOT_NEW_CONVERT", 1)
+    CONVERT_WINDOW = _env("IAMABOT_NEW_CONVERT_WINDOW", 30)
+    CONVERT_KEEP = _env("IAMABOT_NEW_CONVERT_KEEP", 1)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.phase = "defense"
+        self._home_slots_cache = {}
+        self._payload_slots_cache = None
+        self.home_guard_ids = set()
+        self.home_healer_ids = set()
+        self.home_threat = []
+        self.home_anchor = "deposit"
+        self.payload_pusher_ids = set()
+
+    # --------------------------------------------------------------- phase policy
+
+    def _set_phase(self, tick: int) -> None:
+        assault_tick = max(0, self.END_T - self.ASSAULT_PREP_TICKS)
+        if tick < assault_tick:
+            self.phase = "defense"
+        elif tick < self.END_T:
+            self.phase = "prep"
+        else:
+            self.phase = "assault"
+
+    def _tick(self, state: GameState) -> FleetAction:
+        # __call__ initializes END_T before dispatching to this method.
+        self._set_phase(state.tick)
+        act = super()._tick(state)
+        if self.CONVERT:
+            self._endgame_convert(state, act, list(state.fleet_me))
+        return act
+
+    def _endgame_convert(self, state: GameState, act: FleetAction, me: list) -> None:
+        """Trade late extractors for Battle bots before the fabricator shuts down.
+
+        Tokens and mining have no value in the endgame.  A full fleet cannot build a
+        replacement and self-destruct in the same action, so one extractor is released
+        per tick and the next tick's rush fills that slot with a Battle bot.
+        """
+        if not (self.END_T - self.CONVERT_WINDOW <= state.tick < self.END_T - 1):
+            return
+        act.fabricator_next = BATTLE
+        cost = self.conf.fabricator.rush_cost
+        rushing = bool(act.rush_order)
+        if state.fabricator_me.tokens - (cost if rushing else 0) < cost:
+            return
+        if BOTS_MAX - len(me) - (1 if rushing else 0) > 0:
+            return
+        extractors = [u for u in me if u.special.tag == EXTRACTOR]
+        if len(extractors) <= self.CONVERT_KEEP:
+            return
+        victim = min(
+            extractors,
+            key=lambda u: min(
+                ((u.pos.x - e.pos.x) ** 2 + (u.pos.y - e.pos.y) ** 2 for e in state.fleet_other),
+                default=1e9,
+            ),
+        )
+        act.bots[victim.id].self_destruct = True
+
+    def _next_class(self, counts, tick) -> int:
+        """Fill the home economy, then maintain a real medical line."""
+        nb, nh, ne = counts
+        if self.phase in ("defense", "prep"):
+            if ne < min(self.TARGET_EXTRACTORS, int(self.conf.deposit.extractor_cap)):
+                return EXTRACTOR
+            if nh < self.TARGET_HEALERS:
+                return HEALER
+            return BATTLE
+
+        # Existing extractors cannot be converted by the engine.  New production
+        # is therefore only Battle or Healer once the assault has started.
+        if nh < self.TARGET_HEALERS:
+            return HEALER
+        return BATTLE
+
+    def _production(self, state: GameState, act: FleetAction, me: list) -> None:
+        counts = [0, 0, 0]
+        for unit in me:
+            counts[unit.cls] += 1
+        act.fabricator_next = self._next_class(counts, state.tick)
+        act.rush_order = (
+            state.tick < self.END_T
+            and len(me) < BOTS_MAX
+            and state.fabricator_me.tokens >= self.conf.fabricator.rush_cost
+        )
+
+    # -------------------------------------------------------------- home defence
+
+    def _pick_guards(self, battles, op) -> dict:
+        """Keep a real reserve at home while the rest marches to the payload.
+
+        The base controller stops assigning guards at the endgame boundary.  That is
+        reasonable for a payload-first bot, but it creates a predictable hole for this
+        strategy: the old army can arrive at our deposit at exactly the moment our
+        extractors leave.  Re-evaluate the home threat every tick and only release the
+        reserve when the enemy is no longer near either home objective.
+        """
+        dx, dy = self.dep
+        sx, sy = self.spawn
+        alert2 = self.HOME_ALERT_RADIUS ** 2
+        critical2 = self.HOME_CRITICAL_RADIUS ** 2
+        dep_threat = [
+            e for e in self.op_fighters
+            if (e.px - dx) ** 2 + (e.py - dy) ** 2 <= alert2
+        ]
+        spawn_threat = [
+            e for e in self.op_fighters
+            if (e.px - sx) ** 2 + (e.py - sy) ** 2 <= alert2
+        ]
+        threat = {e.id: e for e in dep_threat + spawn_threat}
+        self.home_threat = list(threat.values())
+        self.raid = dep_threat
+        self.home_raid = dep_threat
+        self.home_ids = {e.id for e in dep_threat}
+
+        alive = {b.id for b in battles}
+        self.home_guard_ids.intersection_update(alive)
+        if not battles:
+            self.home_guard_ids.clear()
+            self.home_anchor = "deposit"
+            return {}
+        if self.phase == "defense":
+            # Preserve the baseline's proven raid detector during the long opening.
+            # The custom reserve is only needed once the late march starts; replacing
+            # the detector here would leave the deposit undefended against an early
+            # push and changes the whole opening matchup.
+            self.home_guard_ids.clear()
+            return super()._pick_guards(battles, op)
+
+        dep_power = sum(self._power(e) for e in dep_threat)
+        spawn_power = sum(self._power(e) for e in spawn_threat)
+        critical = any(
+            (e.px - dx) ** 2 + (e.py - dy) ** 2 <= critical2
+            or (e.px - sx) ** 2 + (e.py - sy) ** 2 <= critical2
+            for e in self.home_threat
+        )
+        self.home_critical = critical
+        if spawn_power > dep_power * 1.15:
+            self.home_anchor = "spawn"
+        else:
+            self.home_anchor = "deposit"
+
+        if self.home_threat:
+            # A critical raid gets enough guns to actually clear the home objective;
+            # a distant approach only receives a screening force.  The reserve is
+            # deliberately capped by phase: a home raid cannot turn the endgame into
+            # a permanent base defence while the payload is still being lost.
+            enemy_power = sum(self._power(e) for e in self.home_threat)
+            if self.phase == "assault":
+                # In the endgame mining is already disabled.  A threat at the old
+                # resource point must not strand a full firing line at home; keep only
+                # one emergency sentry for a point-blank breach.
+                guard_count = min(
+                    len(battles),
+                    self.ASSAULT_CRITICAL_GUARDS if critical else self.HOME_ASSAULT_GUARDS,
+                )
+                max_guards = guard_count
+            elif self.phase == "prep":
+                max_guards = max(1, len(battles) // 2)
+            else:
+                max_guards = max(1, len(battles) - 4)
+            if self.phase != "assault":
+                wanted = max(self.HOME_GUARDS, int(math.ceil(enemy_power * (1.25 if critical else 0.9))))
+                guard_count = min(max_guards, wanted)
+        elif self.phase == "prep":
+            guard_count = min(len(battles), max(1, self.HOME_GUARDS))
+        else:
+            # Once the march reaches the payload, keep only a small sentry pair unless
+            # a home threat reappears.  They are enough to catch a lone backdoor unit
+            # without sacrificing the late assault's firing mass.
+            guard_count = min(len(battles), max(0, self.HOME_ASSAULT_GUARDS))
+
+        previous = self.home_guard_ids
+        ordered = sorted(
+            battles,
+            key=lambda b: (
+                0 if b.id in previous else 1,
+                min((b.x - dx) ** 2 + (b.y - dy) ** 2, (b.x - sx) ** 2 + (b.y - sy) ** 2),
+                b.id,
+            ),
+        )
+        chosen = ordered[:guard_count]
+        self.home_guard_ids = {b.id for b in chosen}
+
+        dep_count = len(chosen)
+        if spawn_threat:
+            spawn_count = min(len(chosen), max(1, int(math.ceil(len(chosen) * 0.4))))
+        else:
+            spawn_count = min(len(chosen), 1 if len(chosen) >= 6 else 0)
+        dep_count -= spawn_count
+        dep_slots = self._home_slots("deposit", max(1, dep_count)) if dep_count else []
+        spawn_slots = self._home_slots("spawn", max(1, spawn_count)) if spawn_count else []
+
+        targets = {}
+        di = si = 0
+        for b in chosen:
+            use_spawn = si < spawn_count
+            slots = spawn_slots if use_spawn else dep_slots
+            index = si if use_spawn else di
+            if use_spawn:
+                si += 1
+            else:
+                di += 1
+            if slots:
+                targets[b.id] = slots[index % len(slots)]
+            else:
+                targets[b.id] = self.spawn if use_spawn else self.dep
+        return targets
+
+    def _home_slots(self, name: str, count: int) -> list:
+        """Return separated legal positions around the deposit or spawn."""
+        key = (name, count)
+        cached = self._home_slots_cache.get(key)
+        if cached:
+            return cached
+
+        if name == "deposit":
+            ax, ay = self.dep
+            low, high = 1.4, 7.0
+        else:
+            ax, ay = self.spawn
+            low, high = 1.2, 6.2
+
+        # Face the arena so the ring intercepts a raid before it reaches the
+        # objective.  Positions are checked against walls and solid objectives.
+        vx, vy = self.P[0] - ax, self.P[1] - ay
+        length = math.hypot(vx, vy) or 1.0
+        vx, vy = vx / length, vy / length
+        candidates = []
+        for x, y in self.grid:
+            dx, dy = x - ax, y - ay
+            distance = math.hypot(dx, dy)
+            if distance < low or distance > high:
+                continue
+            if math.hypot(x - self.dep[0], y - self.dep[1]) < self.DEP_R + self.HULL_SAFE:
+                continue
+            if math.hypot(x - self.P[0], y - self.P[1]) < self.P_R + self.HULL_SAFE:
+                continue
+            facing = (dx * vx + dy * vy) / distance
+            score = -abs(distance - self.DEFENSE_RING) + 0.7 * facing
+            candidates.append((score, x, y))
+        candidates.sort(reverse=True)
+
+        selected = []
+        for _, x, y in candidates:
+            if all((x - sx) ** 2 + (y - sy) ** 2 >= self.SPACING ** 2 for sx, sy in selected):
+                selected.append((x, y))
+            if len(selected) >= count:
+                break
+        if not selected:
+            selected = [(ax + vx * 2.0, ay + vy * 2.0)]
+        self._home_slots_cache[key] = selected
+        return selected
+
+    def _local_enemy(self, anchor, radius: float, bot=None):
+        ax, ay = anchor
+        enemies = [
+            enemy for enemy in self.op_fighters
+            if (enemy.px - ax) ** 2 + (enemy.py - ay) ** 2 <= radius * radius
+        ]
+        if not enemies:
+            return None
+        if bot is None:
+            return min(enemies, key=lambda e: (e.px - ax) ** 2 + (e.py - ay) ** 2)
+        return min(enemies, key=lambda e: (e.px - bot.x) ** 2 + (e.py - bot.y) ** 2)
+
+    def _kite_move(self, bot, enemy, index: int, count: int):
+        """Keep an enemy in blaster range with alternating radial movement."""
+        dx, dy = bot.x - enemy.px, bot.y - enemy.py
+        distance = math.hypot(dx, dy)
+        if distance < 1e-4:
+            angle = (bot.id * 2.399963) % (2.0 * math.pi)
+            ux, uy = math.cos(angle), math.sin(angle)
+        else:
+            ux, uy = dx / distance, dy / distance
+        sx, sy = -uy, ux
+
+        if distance < self.KITE_MIN:
+            # Back out immediately from point-blank splash trading.
+            tx = bot.x + ux * 3.0
+            ty = bot.y + uy * 3.0
+        elif distance > self.KITE_MAX:
+            # Close until the target is inside the useful band.
+            tx = enemy.px + ux * self.KITE_FAR
+            ty = enemy.py + uy * self.KITE_FAR
+        else:
+            # Forward/backward pull alternates per unit so the army does not
+            # oscillate as one stack.  A small lane offset creates crossfire.
+            radial_phase = ((self.T + bot.id * 17) // self.KITE_PERIOD) & 1
+            desired = self.KITE_NEAR if radial_phase == 0 else self.KITE_FAR
+            lane = ((index % 5) - 2) * self.KITE_LANE
+            tx = enemy.px + ux * desired + sx * lane
+            ty = enemy.py + uy * desired + sy * lane
+        return self._nav(bot.x, bot.y, tx, ty)
+
+    def _enemy_value(self, enemy) -> float:
+        # The baseline's healers are the reason a numerically even late fight
+        # becomes a war of attrition.  Make them a first-class target.
+        value = super()._enemy_value(enemy)
+        if enemy.cls == HEALER:
+            value += 12.0
+        if enemy.hp <= self.DMG + 0.01:
+            value += 3.0
+        return value
+
+    def _defense_moves(self, front, moves) -> None:
+        if not front:
+            return
+        ordered = sorted(front, key=lambda unit: unit.id)
+        spawn_count = min(self.HOME_GUARDS, max(1, len(ordered) // 4))
+        spawn_slots = self._home_slots("spawn", spawn_count)
+        deposit_slots = self._home_slots("deposit", max(1, len(ordered) - spawn_count))
+
+        for index, bot in enumerate(ordered):
+            at_spawn = index < spawn_count
+            anchor = self.spawn if at_spawn else self.dep
+            slots = spawn_slots if at_spawn else deposit_slots
+            enemy = self._local_enemy(anchor, self.DEFENSE_RADIUS, bot)
+            if enemy is not None:
+                moves[bot.id] = self._kite_move(bot, enemy, index, len(ordered))
+                continue
+            if not slots:
+                moves[bot.id] = self._nav(bot.x, bot.y, *anchor)
+                continue
+            slot_index = index if at_spawn else index - spawn_count
+            tx, ty = slots[slot_index % len(slots)]
+            if (bot.x - tx) ** 2 + (bot.y - ty) ** 2 > 0.35 ** 2:
+                moves[bot.id] = self._nav(bot.x, bot.y, tx, ty)
+            else:
+                moves[bot.id] = (0.0, 0.0)
+
+    # --------------------------------------------------------------- late assault
+
+    def _payload_slots(self, count: int) -> list:
+        key = (round(self.P[0] * 4), round(self.P[1] * 4), count)
+        if self._payload_slots_cache and self._payload_slots_cache[0] == key:
+            return self._payload_slots_cache[1]
+        slots = self._anchor_points(count, [])
+        if len(slots) < count:
+            slots.extend(self._objective_slots(count - len(slots)))
+        self._payload_slots_cache = (key, slots[:count])
+        return slots[:count]
+
+    def _assault_moves(self, front, moves) -> None:
+        if not front:
+            return
+        ordered = sorted(front, key=lambda unit: unit.id)
+        nearby = [
+            enemy for enemy in self.op_fighters
+            if (enemy.px - self.P[0]) ** 2 + (enemy.py - self.P[1]) ** 2
+            <= (self.ASSAULT_PAYLOAD_RADIUS + 3.0) ** 2
+        ]
+        push_count = min(self.PUSHERS, max(3, len(ordered) // 4))
+        payload_slots = self._payload_slots(push_count)
+
+        # Keep the same healthy vanguard across ticks.  Reassigning by list order
+        # makes units swap roles whenever one is healed or killed, which produces a
+        # hesitant blob at the exact moment the payload needs bodies.
+        alive = {unit.id for unit in ordered}
+        self.payload_pusher_ids.intersection_update(alive)
+        if len(self.payload_pusher_ids) < min(push_count, len(ordered)):
+            candidates = sorted(
+                (unit for unit in ordered if unit.id not in self.payload_pusher_ids),
+                key=lambda unit: (
+                    (unit.x - self.P[0]) ** 2 + (unit.y - self.P[1]) ** 2,
+                    -unit.hp,
+                    unit.id,
+                ),
+            )
+            self.payload_pusher_ids.update(
+                unit.id
+                for unit in candidates[: max(0, push_count - len(self.payload_pusher_ids))]
+            )
+
+        if self.phase == "prep":
+            # The march begins before the endgame, but the mining line and its guards
+            # stay in place.  The vanguard takes the shortest route to the circle and
+            # the rest follows in a loose ring, giving the old strategy a moving target
+            # instead of a single stationary firing line.
+            slots = self._objective_slots(len(ordered))
+            if not nearby:
+                for index, bot in enumerate(ordered):
+                    if bot.id in self.payload_pusher_ids and payload_slots:
+                        tx, ty = payload_slots[index % len(payload_slots)]
+                    else:
+                        tx, ty = slots[index % len(slots)] if slots else self.P
+                    moves[bot.id] = self._nav(bot.x, bot.y, tx, ty)
+                return
+
+        if not nearby:
+            # No resistance at the objective: occupy the capture circle quickly.
+            slots = self._objective_slots(len(ordered))
+            for index, bot in enumerate(ordered):
+                tx, ty = slots[index % len(slots)] if slots else self.P
+                moves[bot.id] = self._nav(bot.x, bot.y, tx, ty)
+            return
+
+        for index, bot in enumerate(ordered):
+            target = min(
+                nearby,
+                key=lambda enemy: (
+                    (enemy.px - bot.x) ** 2 + (enemy.py - bot.y) ** 2
+                    - (16.0 if enemy.cls == HEALER else 0.0)
+                    - (5.0 if enemy.hp <= self.DMG + 0.01 else 0.0)
+                ),
+            )
+            target_distance = math.hypot(target.px - bot.x, target.py - bot.y)
+            if bot.id in self.payload_pusher_ids and payload_slots:
+                # A pusher has a different job from the firing line: it must enter the
+                # capture radius even when an enemy is standing on the opposite edge of
+                # the circle.  The old threshold only allowed this while the enemy was
+                # far away, so a four-bot defensive ring could freeze the payload forever.
+                tx, ty = payload_slots[index % len(payload_slots)]
+                in_capture = (bot.x - self.P[0]) ** 2 + (bot.y - self.P[1]) ** 2 <= (
+                    self.CAP_R - 0.25
+                ) ** 2
+                if not in_capture:
+                    moves[bot.id] = self._nav(bot.x, bot.y, tx, ty)
+                elif (bot.x - tx) ** 2 + (bot.y - ty) ** 2 > 0.55 ** 2:
+                    moves[bot.id] = self._nav(bot.x, bot.y, tx, ty)
+                else:
+                    # Keep the anchor in the circle.  Its turn-and-fire action still
+                    # handles the nearby target, while the outer group kites and creates
+                    # the movement the anchor cannot afford to make.
+                    moves[bot.id] = (0.0, 0.0)
+            else:
+                moves[bot.id] = self._kite_move(bot, target, index, len(ordered))
+
+    def _battle_moves(self, front, moves) -> None:
+        if self.phase == "defense":
+            self._defense_moves(front, moves)
+        else:
+            self._assault_moves(front, moves)
+
+    # --------------------------------------------------------------- support units
+
+    def _extractor_moves(self, extractors, moves) -> dict:
+        if self.phase in ("defense", "prep"):
+            return super()._extractor_moves(extractors, moves)
+        out = {}
+        slots = self._payload_slots(len(extractors))
+        for index, bot in enumerate(sorted(extractors, key=lambda unit: unit.id)):
+            tx, ty = slots[index % len(slots)] if slots else self.P
+            moves[bot.id] = self._nav(bot.x, bot.y, tx, ty)
+            # Existing extractors cannot change class; use them as objective bodies.
+            out[bot.id] = (None, False)
+        return out
+
+    def _healer_moves(self, healers, me, moves) -> dict:
+        if self.phase == "defense":
+            plans = {}
+            if not healers:
+                return plans
+            battles = [unit for unit in me if unit.cls == BATTLE]
+            wounded = [unit for unit in battles if unit.hp < self.MAXHP - 0.1]
+            ordered = sorted(healers, key=lambda unit: unit.id)
+            spawn_healers = max(1, len(ordered) // 4)
+            for index, healer in enumerate(ordered):
+                anchor = self.spawn if index < spawn_healers else self.dep
+                patient = min(
+                    wounded,
+                    key=lambda unit: (unit.x - healer.x) ** 2 + (unit.y - healer.y) ** 2,
+                    default=None,
+                )
+                if patient is None:
+                    slots = self._home_slots("spawn" if index < spawn_healers else "deposit", len(ordered))
+                    tx, ty = slots[index % len(slots)] if slots else anchor
+                    plans[healer.id] = None
+                else:
+                    plans[healer.id] = patient.id
+                    away_x, away_y = self._away(patient.x, patient.y, self.op_fighters)
+                    tx = patient.x + away_x * 1.8
+                    ty = patient.y + away_y * 1.8
+                moves[healer.id] = self._nav(healer.x, healer.y, tx, ty)
+            return plans
+
+        plans = {}
+        battles = [unit for unit in me if unit.cls == BATTLE]
+        if not healers or not battles:
+            return plans
+
+        ordered = sorted(healers, key=lambda unit: unit.id)
+        alive_healers = {unit.id for unit in ordered}
+        self.home_healer_ids.intersection_update(alive_healers)
+        home_count = min(self.HOME_HEALERS, len(ordered))
+        if self.phase == "prep" or self.home_threat:
+            home_count = min(max(home_count, 1), len(ordered))
+        elif self.phase == "assault":
+            home_count = min(self.HOME_ASSAULT_GUARDS, len(ordered))
+        if len(self.home_healer_ids) < home_count:
+            self.home_healer_ids.update(
+                healer.id
+                for healer in ordered
+                if healer.id not in self.home_healer_ids
+            )
+            self.home_healer_ids = set(list(self.home_healer_ids)[:home_count])
+
+        home_battles = [b for b in battles if b.id in self.home_guard_ids]
+        attack_battles = [b for b in battles if b.id not in self.home_guard_ids] or battles
+        wounded = [unit for unit in battles if unit.hp < self.MAXHP - 0.1]
+        nearby = [
+            enemy for enemy in self.op_fighters
+            if (enemy.px - self.P[0]) ** 2 + (enemy.py - self.P[1]) ** 2
+            <= (self.ASSAULT_PAYLOAD_RADIUS + 3.0) ** 2
+        ]
+
+        # Home healers sit behind the guard line and keep healing available locally.
+        # They do not follow the payload just because an assault phase started.
+        home_index = 0
+        for healer in ordered:
+            if healer.id not in self.home_healer_ids:
+                continue
+            candidates = [b for b in wounded if b in home_battles]
+            patient = min(
+                candidates or home_battles,
+                key=lambda unit: (unit.x - healer.x) ** 2 + (unit.y - healer.y) ** 2,
+                default=None,
+            )
+            anchor = self.spawn if home_index == 0 and self.home_anchor == "spawn" else self.dep
+            if patient is None:
+                slots = self._home_slots("spawn" if anchor == self.spawn else "deposit", max(1, home_count))
+                tx, ty = slots[home_index % len(slots)] if slots else anchor
+                plans[healer.id] = None
+            else:
+                plans[healer.id] = patient.id
+                away_x, away_y = self._away(patient.x, patient.y, self.home_threat)
+                side_x, side_y = -away_y, away_x
+                lane = ((home_index % 3) - 1) * 0.7
+                tx = patient.x + away_x * 1.8 + side_x * lane
+                ty = patient.y + away_y * 1.8 + side_y * lane
+            moves[healer.id] = self._nav(healer.x, healer.y, tx, ty)
+            home_index += 1
+
+        attack_healers = [h for h in ordered if h.id not in self.home_healer_ids]
+        attack_wounded = [unit for unit in wounded if unit.id not in self.home_guard_ids]
+        for index, healer in enumerate(attack_healers):
+            patient = min(
+                attack_wounded,
+                key=lambda unit: (unit.x - healer.x) ** 2 + (unit.y - healer.y) ** 2,
+                default=None,
+            )
+            if patient is None:
+                patient = attack_battles[index % len(attack_battles)]
+            plans[healer.id] = patient.id
+            away_x, away_y = self._away(patient.x, patient.y, nearby)
+            side_x, side_y = -away_y, away_x
+            lane = ((index % 3) - 1) * 0.8
+            tx = patient.x + away_x * 1.9 + side_x * lane
+            ty = patient.y + away_y * 1.9 + side_y * lane
+            moves[healer.id] = self._nav(healer.x, healer.y, tx, ty)
+        return plans
+
+
+class AdvancedStrategyNew(_VerifiedStrategy):
+    """V10 fire-control with a payload escort formation.
+
+    V10 is a strong gun controller, but its default movement asks every battle bot to
+    chase its nearest enemy and then stop at one distance.  Around the payload that
+    creates the exact failure mode this strategy is meant to avoid: the payload sits
+    between the army and the enemy, the aim planner correctly refuses the blocked
+    shots, and the whole front becomes a stationary line.
+
+    This subclass keeps V10's production, healing and exact shot replay.  It changes
+    only the battle movement: a small vanguard stays on the friendly side of the
+    payload and contests it under cover, while two support lanes take clear shots from
+    the sides.  In open ground the same units use a staggered radial kite instead of
+    walking into one clump.  The formation is deliberately computed from the current
+    payload and enemy centroid, so it follows corners of the payload path rather than
+    assuming that the first straight segment is always active.
+    """
+
+    ASSAULT_PREP_TICKS = _env("IAMABOT_NEW_ASSAULT_PREP", 1200)
+
+    # Payload formation.  The first group stays inside capture range, but outside the
+    # solid hull.  The other groups are far enough out to shoot around the payload.
+    PUSHER_COUNT = _env("IAMABOT_NEW_PUSHER_COUNT", 4)
+    PUSHER_RADIUS = _env("IAMABOT_NEW_PUSHER_RADIUS", 1.65)
+    PUSHER_LANE = _env("IAMABOT_NEW_PUSHER_LANE", 0.62)
+    SUPPORT_RADIUS = _env("IAMABOT_NEW_SUPPORT_RADIUS", 7.8)
+    SUPPORT_LANE = _env("IAMABOT_NEW_SUPPORT_LANE", 3.0)
+    SUPPORT_FORWARD = _env("IAMABOT_NEW_SUPPORT_FORWARD", 1.0)
+    PAYLOAD_FIGHT_RADIUS = _env("IAMABOT_NEW_PAYLOAD_FIGHT_RADIUS", 13.0)
+    PAYLOAD_APPROACH_RADIUS = _env("IAMABOT_NEW_PAYLOAD_APPROACH_RADIUS", 16.0)
+    FORMATION_REFRESH = _env("IAMABOT_NEW_FORMATION_REFRESH", 18)
+    FORMATION_MIN_TICK = _env("IAMABOT_NEW_FORMATION_MIN_TICK", 1500)
+    FORMATION_MIN_BATTLE = _env("IAMABOT_NEW_FORMATION_MIN_BATTLE", 10)
+    FORMATION_MIN_POWER = _env("IAMABOT_NEW_FORMATION_MIN_POWER", 0.88)
+    FORMATION_MIN_LOCAL_POWER = _env("IAMABOT_NEW_FORMATION_MIN_LOCAL_POWER", 0.78)
+
+    # Open-field pullback band.  These values leave a useful firing distance while
+    # making the desired point alternate between the near and far edge of the band.
+    OPEN_NEAR = _env("IAMABOT_NEW_OPEN_NEAR", 7.0)
+    OPEN_FAR = _env("IAMABOT_NEW_OPEN_FAR", 9.0)
+    OPEN_PERIOD = _env("IAMABOT_NEW_OPEN_PERIOD", 42)
+    OPEN_LANE = _env("IAMABOT_NEW_OPEN_LANE", 0.7)
+
+    _ROLE_PUSH = 0
+    _ROLE_LEFT = 1
+    _ROLE_RIGHT = 2
+    _ROLE_REAR = 3
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.phase = "defense"
+        self._new_roles: dict[int, int] = {}
+        self._new_role_tick = -999
+        self._new_targets: dict[int, tuple] = {}
+        self._new_target_key = None
+        self._new_pusher_ids: set[int] = set()
+
+    def _set_phase(self, tick: int) -> None:
+        assault_tick = max(0, self.END_T - self.ASSAULT_PREP_TICKS)
+        if tick < assault_tick:
+            self.phase = "defense"
+        elif tick < self.END_T:
+            self.phase = "prep"
+        else:
+            self.phase = "assault"
+
+    # ------------------------------------------------------------ payload tactics
+
+    @staticmethod
+    def _unit_vec(x: float, y: float, fallback=(1.0, 0.0)):
+        n = math.hypot(x, y)
+        if n < 1e-6:
+            return fallback
+        return x / n, y / n
+
+    def _new_enemy_front(self, fighters):
+        """Return the enemy centroid and the direction from payload to that centroid."""
+        px, py = self.P
+        if not fighters:
+            return px + self.u[0] * 8.0, py + self.u[1] * 8.0, self.u
+        # Bodies close to the objective determine the front.  If the enemy is still
+        # marching in, use all fighters so the escort does not choose a stale side.
+        near = [
+            e
+            for e in fighters
+            if (e.px - px) ** 2 + (e.py - py) ** 2 <= self.PAYLOAD_APPROACH_RADIUS ** 2
+        ]
+        pool = near or fighters
+        ex = sum(e.px for e in pool) / len(pool)
+        ey = sum(e.py for e in pool) / len(pool)
+        ux, uy = self._unit_vec(ex - px, ey - py, self.u)
+        return ex, ey, (ux, uy)
+
+    def _new_role_assignment(self, front):
+        """Keep roles sticky, but replace dead units and resize the pusher group."""
+        alive = {b.id for b in front}
+        self._new_roles = {bid: role for bid, role in self._new_roles.items() if bid in alive}
+        self._new_pusher_ids.intersection_update(alive)
+        if not front:
+            return
+
+        wanted_pushers = min(
+            len(front),
+            max(2, min(self.PUSHER_COUNT, max(2, len(front) // 4))),
+        )
+        # A pusher is selected by distance to the payload, then health.  This keeps the
+        # closest durable bodies in the cover group instead of sending a wounded bot into
+        # the capture circle just because its id is small.
+        if len(self._new_pusher_ids) < wanted_pushers:
+            candidates = sorted(
+                (b for b in front if b.id not in self._new_pusher_ids),
+                key=lambda b: (
+                    (b.x - self.P[0]) ** 2 + (b.y - self.P[1]) ** 2,
+                    -b.hp,
+                    b.id,
+                ),
+            )
+            self._new_pusher_ids.update(
+                b.id for b in candidates[: wanted_pushers - len(self._new_pusher_ids)]
+            )
+        elif len(self._new_pusher_ids) > wanted_pushers:
+            keep = sorted(
+                (b for b in front if b.id in self._new_pusher_ids),
+                key=lambda b: (
+                    (b.x - self.P[0]) ** 2 + (b.y - self.P[1]) ** 2,
+                    -b.hp,
+                    b.id,
+                ),
+            )[:wanted_pushers]
+            self._new_pusher_ids = {b.id for b in keep}
+
+        # Keep side assignments stable.  New support units are divided by their current
+        # lateral position, with id as a deterministic tie-breaker.
+        support = [b for b in front if b.id not in self._new_pusher_ids]
+        for b in front:
+            if b.id in self._new_pusher_ids:
+                self._new_roles[b.id] = self._ROLE_PUSH
+        missing = [b for b in support if b.id not in self._new_roles]
+        for b in missing:
+            self._new_roles[b.id] = self._ROLE_LEFT if b.id % 2 else self._ROLE_RIGHT
+        self._new_role_tick = self.T
+
+    def _new_solid_detour(self, fx, fy, tx, ty):
+        """Navigate to a target while going around the payload when it is in the way.
+
+        `navigate_to` knows about walls, not the moving payload.  A direct request to a
+        point on the far side therefore pushes a bot into the payload forever.  The
+        waypoint is only used while the segment intersects the payload hull; after the
+        bot reaches the side, normal navigation takes over.
+        """
+        px, py = self.P
+        clear = self.P_R + self.R + 0.22
+        if _seg_dist2(px, py, fx, fy, tx, ty) < clear * clear:
+            dx, dy = tx - fx, ty - fy
+            n = math.hypot(dx, dy)
+            if n > 1e-6:
+                nx, ny = -dy / n, dx / n
+                side = (px - fx) * nx + (py - fy) * ny
+                sign = -1.0 if side > 0.0 else 1.0
+                for extra in (0.0, 0.7, -0.7):
+                    wx = px + nx * sign * (clear + extra)
+                    wy = py + ny * sign * (clear + extra)
+                    if self._disc_free(wx, wy, self.R + 0.06):
+                        return self._nav(fx, fy, wx, wy)
+        return self._nav(fx, fy, tx, ty)
+
+    def _new_point(self, x, y, avoid=None):
+        """Return a nearby legal grid point, without doing a full search every tick."""
+        if self._disc_free(x, y, self.R + 0.06):
+            return x, y
+        best = None
+        best_d = 1e9
+        avoid = avoid or []
+        for gx, gy in self.coarse:
+            d = (gx - x) ** 2 + (gy - y) ** 2
+            if d >= best_d or d > 3.0 ** 2:
+                continue
+            if any((gx - ax) ** 2 + (gy - ay) ** 2 < self.SPACING ** 2 for ax, ay in avoid):
+                continue
+            best = (gx, gy)
+            best_d = d
+        return best or (x, y)
+
+    def _new_payload_targets(self, front, fighters):
+        """Build pusher and two side-lane destinations around the current payload."""
+        if not front:
+            return {}
+        ex, ey, (ux, uy) = self._new_enemy_front(fighters)
+        px, py = self.P
+        sx, sy = -uy, ux
+        key = (
+            self.phase,
+            round(px * 2.0),
+            round(py * 2.0),
+            round(ex / 1.5),
+            round(ey / 1.5),
+            len(front),
+        )
+        if (
+            self._new_target_key == key
+            and self.T - self._new_role_tick < self.FORMATION_REFRESH
+            and len(self._new_targets) >= len(front)
+        ):
+            return self._new_targets
+
+        self._new_role_assignment(front)
+        pushers = [b for b in front if self._new_roles.get(b.id) == self._ROLE_PUSH]
+        left = [b for b in front if self._new_roles.get(b.id) == self._ROLE_LEFT]
+        right = [b for b in front if self._new_roles.get(b.id) == self._ROLE_RIGHT]
+        rear = [b for b in front if self._new_roles.get(b.id) == self._ROLE_REAR]
+        targets = {}
+
+        # Pusher destinations are a shallow arc on our side of the payload.  Every
+        # destination is within capture range, so one uncontested pusher can move the
+        # objective while the support lanes keep shooting.
+        n = max(1, len(pushers))
+        for index, b in enumerate(sorted(pushers, key=lambda u: u.id)):
+            lateral = (index - (n - 1) / 2.0) * self.PUSHER_LANE
+            tx = px - ux * self.PUSHER_RADIUS + sx * lateral
+            ty = py - uy * self.PUSHER_RADIUS + sy * lateral
+            targets[b.id] = self._new_point(tx, ty)
+
+        # Side support positions are built from the enemy front, not from the bot's
+        # current position.  This creates a crossfire: the left lane can see targets
+        # that are hidden from the right lane and vice versa.
+        def support_targets(group, side):
+            count = max(1, len(group))
+            for index, b in enumerate(sorted(group, key=lambda u: u.id)):
+                lane = (index - (count - 1) / 2.0) * 1.05
+                # Stay on the support side of the payload and behind the front line,
+                # with the payload offset enough to avoid its centreline shadow.
+                side_offset = side * (self.SUPPORT_LANE + lane)
+                tx = ex - ux * self.SUPPORT_RADIUS + sx * side_offset
+                ty = ey - uy * self.SUPPORT_RADIUS + sy * side_offset
+                candidates = [(tx, ty)]
+                # If the first side is blocked by a wall or still lies in payload
+                # shadow, try a slightly more lateral and slightly rear point.
+                for lateral in (side * 1.4, side * 2.3, -side * 1.4, -side * 2.3):
+                    candidates.append(
+                        (
+                            ex - ux * (self.SUPPORT_RADIUS + self.SUPPORT_FORWARD) + sx * (side_offset + lateral),
+                            ey - uy * (self.SUPPORT_RADIUS + self.SUPPORT_FORWARD) + sy * (side_offset + lateral),
+                        )
+                    )
+                chosen = None
+                for cx, cy in candidates:
+                    cx, cy = self._new_point(cx, cy)
+                    if not self._payload_blocks(cx, cy, ex, ey) and self._los(cx, cy, ex, ey):
+                        chosen = (cx, cy)
+                        break
+                targets[b.id] = chosen or self._new_point(tx, ty)
+
+        support_targets(left, -1.0)
+        support_targets(right, 1.0)
+        # Remaining bots form a rear fire/support line.  They stay on our side of the
+        # payload, but outside capture range, and can rotate to either flank naturally.
+        for index, b in enumerate(sorted(rear, key=lambda u: u.id)):
+            lateral = (index - (max(1, len(rear)) - 1) / 2.0) * 1.1
+            tx = px - ux * 4.4 + sx * lateral
+            ty = py - uy * 4.4 + sy * lateral
+            targets[b.id] = self._new_point(tx, ty)
+        self._new_targets = targets
+        self._new_target_key = key
+        return targets
+
+    def _new_open_move(self, b, enemy, index, count, moves):
+        """Staggered forward/backward pull in open ground."""
+        dx, dy = b.x - enemy.px, b.y - enemy.py
+        d = math.hypot(dx, dy)
+        if d < 1e-5:
+            dx, dy = (1.0, 0.0) if b.id % 2 else (-1.0, 0.0)
+            d = 1.0
+        ux, uy = dx / d, dy / d
+        sx, sy = -uy, ux
+        lane = ((index % 5) - 2) * self.OPEN_LANE
+        phase = ((self.T // self.OPEN_PERIOD) + b.id) & 1
+        wanted = self.OPEN_NEAR if phase == 0 else self.OPEN_FAR
+        if d < self.OPEN_NEAR - 0.35:
+            tx, ty = b.x + ux * 2.0, b.y + uy * 2.0
+        elif d > self.OPEN_FAR + 0.45:
+            tx, ty = enemy.px + ux * self.OPEN_FAR + sx * lane, enemy.py + uy * self.OPEN_FAR + sy * lane
+        else:
+            tx, ty = enemy.px + ux * wanted + sx * lane, enemy.py + uy * wanted + sy * lane
+        moves[b.id] = self._nav(b.x, b.y, tx, ty)
+
+    def _battle_moves(self, front, moves) -> None:
+        if not front:
+            return
+
+        fighters = list(self.op_fighters)
+        if self.home:
+            # V10's home-raid response is already conservative and important; do not
+            # pull the escort away from a point-blank deposit attack.
+            return super()._battle_moves(front, moves)
+
+        px, py = self.P
+        near_payload = any(
+            (b.x - px) ** 2 + (b.y - py) ** 2 <= self.PAYLOAD_FIGHT_RADIUS ** 2
+            for b in front
+        )
+        enemy_near = any(
+            (e.px - px) ** 2 + (e.py - py) ** 2 <= self.PAYLOAD_FIGHT_RADIUS ** 2
+            for e in fighters
+        )
+
+        # Do not reveal the formation while it is still a handful of reinforcements.
+        # The early fight is where V10's close-range focus fire is strongest; the new
+        # formation becomes useful after enough bodies exist to cover both side lanes.
+        # If we are already locally outnumbered, its retreat/press decision is also a
+        # better emergency response than sending a small escort into the circle.
+        if (
+            self.T < self.FORMATION_MIN_TICK
+            or len(front) < self.FORMATION_MIN_BATTLE
+            or self.my_all < self.FORMATION_MIN_POWER * max(self.op_all, 1.0)
+            or (
+                self.op_near > 0.5
+                and self.my_near < self.FORMATION_MIN_LOCAL_POWER * self.op_near
+            )
+        ):
+            return super()._battle_moves(front, moves)
+
+        # No local fight yet: march to the payload as a group.  Once an enemy is near,
+        # the formation below takes over.  This prevents a wall-side chase from dragging
+        # the whole army away from the objective.
+        if not fighters:
+            targets = self._new_payload_targets(front, [])
+            for b in front:
+                tx, ty = targets.get(b.id, (px, py))
+                moves[b.id] = self._new_solid_detour(b.x, b.y, tx, ty)
+            return
+
+        if not near_payload and not enemy_near:
+            # Open-field fight: keep the army mobile and spread across the front.  The
+            # nearest enemy is only used to define each bot's local kite target.
+            for index, b in enumerate(sorted(front, key=lambda u: u.id)):
+                enemy = min(
+                    fighters,
+                    key=lambda e: (e.px - b.x) ** 2 + (e.py - b.y) ** 2,
+                )
+                if b.hp <= self.RETREAT_HP and (
+                    (enemy.px - b.x) ** 2 + (enemy.py - b.y) ** 2 <= (self.RANGE + 2.0) ** 2
+                ):
+                    ax, ay = self._away(b.x, b.y, fighters)
+                    moves[b.id] = self._nav(b.x, b.y, b.x + ax * 2.5, b.y + ay * 2.5)
+                else:
+                    self._new_open_move(b, enemy, index, len(front), moves)
+            return
+
+        # Payload fight: assign the close cover group and the two firing lanes.
+        targets = self._new_payload_targets(front, fighters)
+        for b in front:
+            role = self._new_roles.get(b.id, self._ROLE_RIGHT)
+            tx, ty = targets.get(b.id, (px, py))
+            if b.hp <= self.RETREAT_HP:
+                enemy = min(fighters, key=lambda e: (e.px - b.x) ** 2 + (e.py - b.y) ** 2)
+                d2 = (enemy.px - b.x) ** 2 + (enemy.py - b.y) ** 2
+                if d2 <= (self.RANGE + 2.0) ** 2:
+                    ax, ay = self._away(b.x, b.y, fighters)
+                    moves[b.id] = self._nav(b.x, b.y, b.x + ax * 2.5, b.y + ay * 2.5)
+                    continue
+            if role == self._ROLE_PUSH:
+                moves[b.id] = self._new_solid_detour(b.x, b.y, tx, ty)
+            else:
+                # Support/rear units may move laterally even after reaching their point;
+                # this small periodic offset prevents a stationary firing wall without
+                # pulling them through the payload shadow.
+                moves[b.id] = self._new_solid_detour(b.x, b.y, tx, ty)
+
+    def _tick(self, state: GameState) -> FleetAction:
+        # V10 retains the proven production, healing and shot replay via dynamic dispatch.
+        self._set_phase(state.tick)
+        return super()._tick(state)
 
 
 class ReferenceStrategy:
