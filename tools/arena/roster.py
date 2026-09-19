@@ -59,6 +59,8 @@ ROSTER = {
     "db_jkt": (V9, "OPP=deathball", {"ball", "heal", "real:JaniceKeepTalking"}),
     "db_tn": (V9, "OPP=deathball,BALL_OPENING=BEHEBBEBHBBBHBBBH,BALL_EXTRACTORS=6", {"ball", "real:Team Name"}),
     "db_clank": (V9, "OPP=deathball,BALL_OPENING=EBBBBBHBEEHHBHBHB,BALL_HEALERS=0.4", {"ball", "heal", "real:clankerbot"}),
+    "db_clank_behind": (V9, "OPP=deathball,BALL_OPENING=EBBBBBHBEEHHBHBHB,BALL_HEALERS=0.4,BALL_SIDE=-1,BALL_R_IN=1.4,BALL_R=4.5", {"ball", "heal", "cover", "real:clankerbot"}),
+    "db_tn_behind": (V9, "OPP=deathball,BALL_OPENING=BEHEBBEBHBBBHBBBH,BALL_EXTRACTORS=6,BALL_SIDE=-1,BALL_R_IN=1.4,BALL_R=4.5", {"ball", "cover", "real:Team Name"}),
     # ------------------------------------------------ turtle / stall / hug
     "reference": ("reference", "", {"turtle", "stack"}),
     "stacker": (V1, "OPP=stacker", {"turtle", "stack"}),

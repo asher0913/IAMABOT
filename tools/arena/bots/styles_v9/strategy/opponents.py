@@ -18,6 +18,10 @@ class Deathball(AdvancedStrategy):
     HEALER_RATIO = float(os.environ.get("BALL_HEALERS", "0.33"))
     R_OUT = float(os.environ.get("BALL_R", "2.3"))
     SPACING = float(os.environ.get("BALL_GAP", "0.6"))
+    # +1: pack on the side facing the enemy; -1: behind the payload, which shields the
+    # ball (clankerbot in match 1247 at t=3900).
+    SIDE = float(os.environ.get("BALL_SIDE", "1"))
+    R_IN = float(os.environ.get("BALL_R_IN", "1.15"))
 
     def _ball_spots(self):
         px, py = self.P
@@ -26,7 +30,7 @@ class Deathball(AdvancedStrategy):
             return self._ball
         ux, uy = self.u
         spots = []
-        r = 1.15
+        r = self.R_IN
         while r <= self.R_OUT + 1e-6:
             n = max(6, int(2 * math.pi * r / self.SPACING))
             for k in range(n):
@@ -34,7 +38,8 @@ class Deathball(AdvancedStrategy):
                 x, y = px + math.cos(a) * r, py + math.sin(a) * r
                 if self._disc_free(x, y, 0.3):
                     # Inner rings first, then the side facing the enemy.
-                    spots.append((r - 0.3 * (math.cos(a) * ux + math.sin(a) * uy), x, y))
+                    face = math.cos(a) * ux + math.sin(a) * uy
+                    spots.append(((r - 0.3 * face) if self.SIDE > 0 else (0.3 * r + face), x, y))
             r += self.SPACING * 0.9
         spots.sort()
         self._ball_key, self._ball = key, [(x, y) for _, x, y in spots]
