@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Reproducible regression matches with the real engine.
 
-    python3 tools/arena/arena.py NAME=BOT[:ENV] ... [--opps quick|full|tag:raid|a,b]
+    python3 tools/arena/arena.py NAME=BOT[:ENV] ... [--opps key|quick|full|tag:raid|a,b]
                                  [--repeat N] [-j JOBS] [--baseline NAME] [--out FILE]
 
 BOT is a directory under tools/arena/bots/ (e.g. baseline_v12) or `live` (this repo's
@@ -33,7 +33,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 sys.path.insert(0, str(HERE))
-from roster import QUICK, ROSTER  # noqa: E402
+from roster import KEY, QUICK, ROSTER  # noqa: E402
 
 ENGINE = ROOT / ".mm" / "bin" / "mm-engine"
 WORK = HERE / ".work"
@@ -130,6 +130,8 @@ def play(cand, cbot, cenv, opp, obot, oenv, we_a, rep, lib, keep):
 
 
 def pick_opponents(spec: str) -> list:
+    if spec == "key":
+        return list(KEY)
     if spec == "quick":
         return list(QUICK)
     if spec == "full":

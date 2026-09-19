@@ -80,3 +80,8 @@ QUICK = [
     "v12", "v7", "jkt", "jkt_cover", "gang7", "gangx", "noey", "clanker",
     "st24", "dibsfa8", "dibsfa_turtle", "stacker", "g3_heal45",
 ]
+
+# The key set (about a minute with -j 10): the replicas of the teams that beat us on the
+# server, plus the ones where past changes broke first.  Use it for every experiment;
+# run `full` only before a release.
+KEY = ["clanker", "jkt", "db_clank", "dibsfa8", "st24", "noey", "v12"]

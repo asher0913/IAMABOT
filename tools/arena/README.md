@@ -11,7 +11,8 @@ python3 tools/arena/arena.py base=baseline_v12 "cand=live:IAMABOT_PUSH=1" \
 
 - `NAME=BOT[:K=V;K=V]`: `BOT` is a directory under `bots/` or `live` (this repo's `strategy/`
   as it is on disk); the `K=V` pairs are environment overrides (the strategy reads `IAMABOT_*`).
-- `--opps quick` (13 opponents, one or two per failure type), `full` (all of `roster.py`),
+- `--opps key` (7 opponents, ~1 minute: the replicas of the teams that beat us plus the ones
+  where past changes broke first), `quick` (13), `full` (all of `roster.py`),
   `tag:raid`, or a comma list. Every game is played with us as A and as B.
 - `--baseline NAME` prints the games the candidate newly lost and newly won against that
   baseline; `--baseline-file` reuses the baseline rows of an earlier JSONL instead of replaying.
