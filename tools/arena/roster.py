@@ -18,6 +18,9 @@ ROSTER = {
     "v12": ("baseline_v12", "", {"history", "baseline"}),
     "v10": ("v10", "", {"history"}),
     "brain_new": ("brain_new", "", {"history", "cover", "teammate:GHX"}),
+    "codex_sustain": ("codex_sustain", "", {"history", "codex"}),
+    "v11": ("v11", "", {"history"}),
+    "v11s": ("v11s", "", {"history"}),
     # ------------------------------------------------------------------ rush
     "rushB": (V1, "OPP=advanced,IAMABOT_OPENING=BBBBBBBBBBBBBBBBB,IAMABOT_EXTRACTORS=0,IAMABOT_HEALER_RATIO=0", {"rush", "no_miners"}),
     "rushB5": (V5, "OPP=advanced,IAMABOT_OPENING=BBBBBBBBBBBBBBBBB,IAMABOT_EXTRACTORS=0,IAMABOT_HEALER_RATIO=0", {"rush", "no_miners"}),

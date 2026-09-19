@@ -192,9 +192,6 @@ class AdvancedStrategy:
     SUSTAIN_EXTRACTORS = _env("IAMABOT_SUSTAIN_EXTRACTORS", 3)
     SUSTAIN_TICK = _env("IAMABOT_SUSTAIN_TICK", 5)
     CONVERT = _env("IAMABOT_CONVERT", 1)
-    BLIND = _env("IAMABOT_BLIND", 1)
-    BLIND_T = _env("IAMABOT_BLIND_T", 120)
-    BLIND_DROP = _env("IAMABOT_BLIND_DROP", 0.01)
     CONVERT_WINDOW = _env("IAMABOT_CONVERT_WINDOW", 30)
     CONVERT_KEEP = _env("IAMABOT_CONVERT_KEEP", 1)
     PUSH_NEAR = _env("IAMABOT_PUSH_NEAR", 12.0)
@@ -237,8 +234,6 @@ class AdvancedStrategy:
         self.home_since = 0
         self.retreating: set = set()
         self.push = False
-        self.blind: dict = {}
-        self.cap_hist: list = []
         self.push_count = 0
         self.sustain = False
         self.stealing = False
@@ -468,10 +463,6 @@ class AdvancedStrategy:
             self.capture_moved = T
             self.last_capture = state.capture
         self.capture = state.capture
-        if T % 20 == 0:
-            self.cap_hist.append(state.capture)
-            if len(self.cap_hist) > 6:
-                self.cap_hist.pop(0)
         px, py = self._payload(state.capture)
         self.P = (px, py)
         self.endgame = T >= self.END_T
@@ -1019,16 +1010,6 @@ class AdvancedStrategy:
             D2 = self.D_CLOSE ** 2
         under_fire2 = (self.RANGE + 1.5) ** 2
         safe2 = (self.RANGE + 2.5) ** 2
-        # The enemy is pushing the payload toward our end right now (Team Name 656,
-        # brain_new): an army standing off behind a wall, with nothing to shoot for a
-        # long time, walks back to the payload instead of watching it go.  The whole
-        # blind group switches at about the same time, so it moves as one.
-        losing = (
-            self.BLIND
-            and len(self.cap_hist) >= 6
-            and self.cap_hist[0] - self.capture >= self.BLIND_DROP
-        )
-        blind_now = self.blind
         for b in front:
             ranked = sorted(fighters, key=lambda o: (o.px - b.x) ** 2 + (o.py - b.y) ** 2)
             e = ranked[0]
@@ -1075,19 +1056,6 @@ class AdvancedStrategy:
                     if (px - b.x) * nx + (py - b.y) * ny > 0:
                         nx, ny = -nx, -ny
                     moves[b.id] = self._nav(b.x, b.y, b.x + nx * 1.5, b.y + ny * 1.5)
-                    continue
-            if self.BLIND:
-                seen = False
-                for o in ranked[:5]:
-                    if (o.px - b.x) ** 2 + (o.py - b.y) ** 2 > shoot2:
-                        break
-                    if not self._payload_blocks(b.x, b.y, o.px, o.py) and self._los(b.x, b.y, o.px, o.py):
-                        seen = True
-                        break
-                blind_now[b.id] = 0 if seen else blind_now.get(b.id, 0) + 1
-                if losing and blind_now[b.id] >= self.BLIND_T:
-                    moves[b.id] = self._nav(b.x, b.y, px, py)
-                    self.stats["blind_move"] = self.stats.get("blind_move", 0) + 1
                     continue
             if self.PRESS_LOS:
                 # Stand only where we actually have a shot at someone; otherwise keep

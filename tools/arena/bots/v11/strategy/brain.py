@@ -184,13 +184,6 @@ class AdvancedStrategy:
     PUSH_MODE = _env("IAMABOT_PUSH", 1)
     HEAL_ANY = _env("IAMABOT_HEAL_ANY", 1)
     HEAL_SPOT = _env("IAMABOT_HEAL_SPOT", 1)
-    # Current leader openings have a distinct four-bot production fingerprint.  A global
-    # 36% healer ratio loses games to rush/economy opponents, so only raise our later ratio
-    # when that fingerprint is present; the opening itself is unchanged.
-    SUSTAIN_MODE = _env("IAMABOT_SUSTAIN", 1)
-    SUSTAIN_RATIO = _env("IAMABOT_SUSTAIN_RATIO", 0.36)
-    SUSTAIN_EXTRACTORS = _env("IAMABOT_SUSTAIN_EXTRACTORS", 3)
-    SUSTAIN_TICK = _env("IAMABOT_SUSTAIN_TICK", 5)
     CONVERT = _env("IAMABOT_CONVERT", 1)
     BLIND = _env("IAMABOT_BLIND", 1)
     BLIND_T = _env("IAMABOT_BLIND_T", 120)
@@ -240,7 +233,6 @@ class AdvancedStrategy:
         self.blind: dict = {}
         self.cap_hist: list = []
         self.push_count = 0
-        self.sustain = False
         self.stealing = False
         self.debug_next = 0
         self.why: dict = {}
@@ -713,16 +705,6 @@ class AdvancedStrategy:
     def _next_class(self, counts, T) -> int:
         nb, nh, ne = counts
         if T < 60:
-            if T == self.SUSTAIN_TICK and self.SUSTAIN_MODE:
-                # One cheap production-order fingerprint, then zero runtime overhead.
-                # Current server leaders start B-B-B-E (clanker/Janice) or B-H-E-E
-                # (Team Name); our normal mirror starts B-B-E-E.  Avoid loops and
-                # geometry here: the compute bank is decisive in 9000-tick turtle games.
-                nf = len(self.op_fighters)
-                self.sustain = len(self.op) == 4 and (
-                    nf == 3
-                    or (nf == 2 and self.op_fighters[0].cls + self.op_fighters[1].cls == HEALER)
-                )
             want = {"B": 0, "H": 0, "E": 0}
             for ch in self.OPENING:
                 want[ch] += 1
@@ -739,17 +721,15 @@ class AdvancedStrategy:
         )
         # Economy only while the army is holding its own: a lost fight needs guns now.
         army_ok = self.my_all >= 0.9 * self.op_all
-        extractor_target = self.SUSTAIN_EXTRACTORS if self.sustain else self.EXTRACTOR_TARGET
         if (
-            ne < extractor_target
+            ne < self.EXTRACTOR_TARGET
             and T < self.EXTRACTOR_CUTOFF
             and dep_safe
             and army_ok
             and nb >= 6
         ):
             return EXTRACTOR
-        healer_ratio = self.SUSTAIN_RATIO if self.sustain else self.HEALER_RATIO
-        if nb >= 5 and nh < int(healer_ratio * (nb + nh) + 0.5):
+        if nb >= 5 and nh < int(self.HEALER_RATIO * (nb + nh) + 0.5):
             return HEALER
         return BATTLE
 
