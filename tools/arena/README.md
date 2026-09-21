@@ -23,7 +23,8 @@ python3 tools/arena/arena.py base=baseline_v12 "cand=live:IAMABOT_PUSH=1" \
   prints shots / hits / losses / heals per 1000 ticks for one of them.
 
 Rule for changing the default: a change is adopted only if, on the full roster and both
-sides, it loses no game the baseline won. `results/` keeps the raw JSONL of every decision.
+sides, it loses no game the baseline won. Runs write their raw JSONL to `results/` (not kept in
+the repository; the evidence behind each version is summarised in `docs/STRATEGY_zh.md`).
 
 Opponents are built from our own controllers (`bots/styles_*`) with a different plan, so
 their fire control is at least as good as ours: they overstate enemy micro and do not

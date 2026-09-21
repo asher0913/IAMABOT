@@ -18,14 +18,6 @@ ROSTER = {
     "v12": ("baseline_v12", "", {"history", "baseline"}),
     "v10": ("v10", "", {"history"}),
     "brain_new": ("brain_new", "", {"history", "cover", "teammate:GHX"}),
-    "codex_sustain": ("codex_sustain", "", {"history", "codex"}),
-    "v11": ("v11", "", {"history"}),
-    "v11s": ("v11s", "", {"history"}),
-    "v121f": ("v121f", "", {"history"}),
-    "v122h": ("v122h", "", {"history"}),
-    "v122m": ("v122m", "", {"history"}),
-    "v123s": ("v123s", "", {"history"}),
-    "v125b": ("v125b", "", {"history"}),
     # ------------------------------------------------------------------ rush
     "rushB": (V1, "OPP=advanced,IAMABOT_OPENING=BBBBBBBBBBBBBBBBB,IAMABOT_EXTRACTORS=0,IAMABOT_HEALER_RATIO=0", {"rush", "no_miners"}),
     "rushB5": (V5, "OPP=advanced,IAMABOT_OPENING=BBBBBBBBBBBBBBBBB,IAMABOT_EXTRACTORS=0,IAMABOT_HEALER_RATIO=0", {"rush", "no_miners"}),
@@ -68,7 +60,8 @@ ROSTER = {
     "ball_clank": (V61, "OPP=escort,IAMABOT_OPENING=EBBBBBHBEEHHBHBHB,IAMABOT_EXTRACTORS=3,ESCORT_RING=2.2,ESCORT_GAP=1.2,IAMABOT_HEALER_RATIO=0.4", {"ball", "heal", "real:clankerbot"}),
     "db_jkt": (V9, "OPP=deathball", {"ball", "heal", "real:JaniceKeepTalking"}),
     "db_tn": (V9, "OPP=deathball,BALL_OPENING=BEHEBBEBHBBBHBBBH,BALL_EXTRACTORS=3", {"ball", "real:Team Name"}),
-    # --- 2026-09-19 22:00 的实测画像（开局/兵种/离车距离/圈内人数均来自录像） ---
+    # Profiles measured from the 19 Sep 22:00 replays (opening, composition, distance to
+    # the payload, bodies in the circle).  Built on our own core, so their aim is ours.
     "top_clank16": (V9, "OPP=deathball,BALL_OPENING=EBBBBBHBEEHHBHBHB,BALL_HEALERS=0.37,BALL_EXTRACTORS=3,BALL_R_IN=1.4,BALL_R=4.5", {"top"}),
     "top_jkt9": (V9, "OPP=deathball,BALL_OPENING=EEEBEEEEEHBBHBBHB,BALL_HEALERS=0.28,BALL_EXTRACTORS=5,BALL_R_IN=2.0,BALL_R=7.0", {"top"}),
     "top_csk": (V9, "OPP=deathball,BALL_OPENING=EEEEBBHBBBHBBHBBH,BALL_HEALERS=0.25,BALL_EXTRACTORS=4,BALL_R_IN=1.3,BALL_R=4.0", {"top"}),
@@ -101,4 +94,4 @@ QUICK = [
 # The key set (about a minute with -j 10): the replicas of the teams that beat us on the
 # server, plus the ones where past changes broke first.  Use it for every experiment;
 # run `full` only before a release.
-KEY = ["clanker", "jkt", "db_clank", "dibsfa8", "st24", "noey", "v12"]
+KEY = ["brain_new", "clanker", "jkt", "db_clank", "dibsfa8", "st24", "noey", "v12"]
