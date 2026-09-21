@@ -1,11 +1,15 @@
-/*
-!/strategy/
-!/tools/
-!/mm-config.toml
-!/.gitignore
+# build outputs
 **/__pycache__/
-**/target/
-.DS_Store
 *.pyc
+**/target/
+
+# local tools, credentials and logs created by mm-cli
+/.mm/
+/.mm-token.txt
+/logs/
+
+# regression arena scratch space and raw results
 /tools/arena/.work/
-/tools/arena/results/tmp*.jsonl
+/tools/arena/results/
+
+.DS_Store
