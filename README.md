@@ -1,5 +1,9 @@
 # IAMABOT — a MechMania 32 strategy bot
 
+[![CI](https://github.com/asher0913/IAMABOT/actions/workflows/ci.yml/badge.svg)](https://github.com/asher0913/IAMABOT/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Rust](https://img.shields.io/badge/engine%20bindings-Rust-orange)
+
 Team **IAMABOT**'s entry for [MechMania 32](https://mechmania.github.io/), a 24-hour AI
 programming competition. Two programs each command a fleet of up to 32 bots on a walled
 32×32 map. A team wins by pushing the payload all the way to the enemy's end, by wiping
@@ -93,6 +97,10 @@ You need Rust, Python 3 and the MechMania CLI (setup details are in
 cargo install --git https://github.com/mechmania/cli
 mm-cli run            # builds the engine bindings and plays the bot against itself
 ```
+
+CI compiles every Python file and checks for syntax errors and undefined names. It cannot play
+games, because the engine bindings are built locally by the MechMania CLI; the regression arena
+below is the behavioural test.
 
 To run the regression arena against the key opponents, both sides (about a minute on 10
 cores):

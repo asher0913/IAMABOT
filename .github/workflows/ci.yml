@@ -1,0 +1,22 @@
+name: CI
+
+# The bot needs the MechMania engine, which the mm CLI builds locally, so CI cannot play games.
+# It checks that every Python file compiles and has no syntax errors or undefined names.
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile every Python file
+        run: python -m compileall -q .
+      - name: Syntax errors and undefined names
+        run: |
+          python -m pip install ruff
+          ruff check --select E9,F63,F7,F82 .
